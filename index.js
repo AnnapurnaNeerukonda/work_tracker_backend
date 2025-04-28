@@ -1,17 +1,37 @@
-const express = require('express');
+// const express = require('express');
+// const cors = require('cors');
+// const bodyParser = require('body-parser');
+// const mongoose = require('mongoose');
+// const multer = require('multer');
+// const path = require('path');
+// const fs = require('fs');
+// const bcrypt = require("bcrypt");  // Ensure bcrypt is imported
+// const jwt = require("jsonwebtoken");
+// const app = express();
+// app.use(cors());
+// app.use(bodyParser.json());
+// require('dotenv').config();
+const express = require('express'); 
 const cors = require('cors');
 const bodyParser = require('body-parser');
 const mongoose = require('mongoose');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
-const bcrypt = require("bcrypt");  // Ensure bcrypt is imported
+const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
+
 const app = express();
-app.use(cors());
+
+// Configure CORS to allow only your frontend domain
+app.use(cors({
+  origin: 'https://work-tracker-frontend-git-main-annapurnaneerukondas-projects.vercel.app', // Allow this origin
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],  // Allow these HTTP methods
+  allowedHeaders: ['Content-Type', 'Authorization'], // Allow these headers
+}));
+
 app.use(bodyParser.json());
 require('dotenv').config();
-
 const dbUri = 'mongodb+srv://annapurna2005k:annapurna2005k@cluster0.natn6ch.mongodb.net/saiSuneelAndCo?retryWrites=true&w=majority&appName=Cluster0';
 mongoose.connect(dbUri, {
   useNewUrlParser: true,
