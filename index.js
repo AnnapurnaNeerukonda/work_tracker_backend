@@ -1,16 +1,4 @@
-// const express = require('express');
-// const cors = require('cors');
-// const bodyParser = require('body-parser');
-// const mongoose = require('mongoose');
-// const multer = require('multer');
-// const path = require('path');
-// const fs = require('fs');
-// const bcrypt = require("bcrypt");  // Ensure bcrypt is imported
-// const jwt = require("jsonwebtoken");
-// const app = express();
-// app.use(cors());
-// app.use(bodyParser.json());
-// require('dotenv').config();
+
 const express = require('express'); 
 const cors = require('cors');
 const bodyParser = require('body-parser');
@@ -25,7 +13,7 @@ const app = express();
 
 // Configure CORS to allow only your frontend domain
 app.use(cors({
-  origin: 'https://work-tracker-frontend-git-main-annapurnaneerukondas-projects.vercel.app', // Allow this origin
+  origin: ['https://work-tracker-frontend-git-main-annapurnaneerukondas-projects.vercel.app','http://localhost:3000/'], // Allow this origin
   methods: ['GET', 'POST', 'PUT', 'DELETE'],  // Allow these HTTP methods
   allowedHeaders: ['Content-Type', 'Authorization'], // Allow these headers
 }));
