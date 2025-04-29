@@ -12,11 +12,25 @@ const jwt = require("jsonwebtoken");
 const app = express();
 
 // Configure CORS to allow only your frontend domain
+const allowedOrigins = [
+  'https://work-tracker-frontend-git-main-annapurnaneerukondas-projects.vercel.app',
+  'http://localhost:3000'
+];
+
 app.use(cors({
-  origin: ['https://work-tracker-frontend-git-main-annapurnaneerukondas-projects.vercel.app','http://localhost:3000/'], // Allow this origin
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],  // Allow these HTTP methods
-  allowedHeaders: ['Content-Type', 'Authorization'], // Allow these headers
+  origin: function (origin, callback) {
+    // allow requests with no origin (like mobile apps, curl, Postman)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    } else {
+      return callback(new Error('Not allowed by CORS'));
+    }
+  },
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
 }));
+
 
 app.use(bodyParser.json());
 require('dotenv').config();
@@ -63,7 +77,13 @@ const workSchema = new mongoose.Schema({
   pending_documents: Boolean,
   status: String,
   employeeId: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee' },
-  clientId: { type: mongoose.Schema.Types.ObjectId, ref: 'Client' }
+  clientId: { type: mongoose.Schema.Types.ObjectId, ref: 'Client' },
+  work_completed_date:Date,
+  fee_estimation: String,
+  amount: Number,
+  discount: Number, 
+  total_bill: Number,
+  isPaid: { type: Boolean, default: false }
 });
 
 const Work = mongoose.models.Work || mongoose.model('Work', workSchema);
@@ -90,7 +110,112 @@ const UserSchema = new mongoose.Schema({
   password: String,
 });
 
-const User = mongoose.model("User", UserSchema, "user");  // <- specify collection name
+const User = mongoose.model("User", UserSchema, "user");
+
+const paymentSchema = new mongoose.Schema({
+  client_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Client', required: true },
+  work_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Work', required: true },
+  amount: { type: Number, required: true },
+  discount_percentage: { type: Number, required: true },
+  total_bill: { type: Number, required: true },
+  payment_date: { type: Date, required: true },
+});
+const Payment = mongoose.model("Payment", paymentSchema, "payments");
+
+
+app.get('/unpaid-works/:clientId', async (req, res) => {
+  try {
+    console.log("Client ID:", req.params.clientId);
+    const works = await Work.find({
+      clientId: req.params.clientId,
+      isPaid: false // ✅ filter only unpaid works
+    });
+    res.json(works);
+  } catch (err) {
+    console.error("Error fetching unpaid works:", err);
+    res.status(500).json({ error: 'Failed to fetch unpaid works' });
+  }
+});
+
+app.post('/submit-bill', async (req, res) => {
+  try {
+    const { workId, amount, discount } = req.body;
+    const discountAmt = (amount * discount) / 100;
+    const total_bill = amount - discountAmt;
+    console.log(total_bill , workId , amount , discount)
+    const updatedWork = await Work.findByIdAndUpdate(workId, {
+      amount,
+      discount,
+      total_bill,
+      isPaid: true
+    }, { new: true });
+    console.log(updatedWork)
+    res.json({ message: "Bill updated successfully", updatedWork });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to submit bill' });
+  }
+});
+app.get('/payments/:clientId', async (req, res) => {
+  const { clientId } = req.params;
+
+  try {
+    const payments = await Payment.find({ client_id: clientId }).populate('work_id');
+    
+    if (!payments.length) {
+      return res.status(404).json({ message: 'No payments found for this client' });
+    }
+
+    const paymentDetails = payments.map(payment => ({
+      work_description: payment.work_id.description, // Assuming 'description' is a field in Work schema
+      amount: payment.amount,
+      discount_percentage: payment.discount_percentage,
+      total_bill: payment.total_bill,
+      payment_date: payment.payment_date,
+    }));
+
+    res.status(200).json(paymentDetails);
+  } catch (error) {
+    console.error('Error fetching payments:', error);
+    res.status(500).json({ error: 'Failed to fetch payments' });
+  }
+});
+
+app.post('/add-payment', async (req, res) => {
+  const { client_id, work_id, amount, discount_percentage } = req.body;
+  const payment_date = new Date();
+
+  try {
+    if (!client_id || !work_id || !amount || !discount_percentage) {
+      return res.status(400).send('All fields are required');
+    }
+
+    // Calculate the total bill after discount
+    const discountAmount = (amount * discount_percentage) / 100;
+    const total_bill = amount - discountAmount;
+
+    // Create a new payment document
+    const payment = new Payment({
+      client_id,
+      work_id,
+      amount,
+      discount_percentage,
+      total_bill,
+      payment_date,
+    });
+
+    // Save the payment to the database
+    await payment.save();
+
+    res.status(201).json({
+      message: 'Payment added successfully',
+      payment,
+    });
+  } catch (error) {
+    console.error('Error adding payment:', error);
+    res.status(500).json({ error: 'Failed to add payment' });
+  }
+});
+
 app.get("/test-user", async (req, res) => {
   try {
     const users = await User.find();  // Get all users
@@ -176,7 +301,7 @@ app.get('/reports', async (req, res) => {
       employee_name: work.employeeId.name,
       work_assigned_date: new Date(work.work_assigned_date).toLocaleDateString(),
       status: work.status,
-      description: work.work_description,
+      work_description: work.work_description,
     }));
 
     res.json(formattedWorks);
@@ -185,6 +310,7 @@ app.get('/reports', async (req, res) => {
     res.status(500).json({ error: 'Database error', details: err });
   }
 });
+
 app.post('/clients', upload.single('client_pic'), async (req, res) => {
   const {
     name,
@@ -200,6 +326,8 @@ app.post('/clients', upload.single('client_pic'), async (req, res) => {
     works, // JSON string
   } = req.body;
 
+  console.log("Received works:", works);
+
   try {
     // Find employee by name
     const employee = await Employee.findOne({ name: employee_name });
@@ -212,10 +340,16 @@ app.post('/clients', upload.single('client_pic'), async (req, res) => {
       try {
         const rawWorks = JSON.parse(works);
         parsedWorks = rawWorks.map((work) => ({
-          ...work,
-          status: work.pending_documents ? "pending documents" : "in progress",
+          work_name: work.work_name || '',
+          work_description: work.work_description || '',
+          pending_documents: Array.isArray(work.pending_documents) && work.pending_documents.length > 0 ? true : false, // 👈 Fixed
+          fee_estimation: work.fee_estimation !== undefined ? work.fee_estimation : 0,
+          work_assigned_date: new Date(),
+          due_date: work.due_date ? new Date(work.due_date) : null,
+          status: (Array.isArray(work.pending_documents) && work.pending_documents.length > 0) ? "pending documents" : "in progress",
         }));
-      } catch (err) {
+      }catch (err) {
+        console.error("Error parsing works:", err);
         return res.status(400).send({ message: "Invalid format for works array" });
       }
     }
@@ -252,6 +386,7 @@ app.post('/clients', upload.single('client_pic'), async (req, res) => {
       client: savedClient,
       works: savedWorks,
     });
+
   } catch (error) {
     console.error("Error:", error);
     res.status(500).send({
@@ -285,34 +420,32 @@ app.get('/work/:clientId', async (req, res) => {
   }
 });
 app.post('/add-work', async (req, res) => {
-  const { client_id, employee_id, work_description, pending_documents } = req.body;
+  const { client_id, employee_id, work_description, pending_documents, work_assigned_date, due_date, fee_estimation } = req.body;
+
   try {
-  
-    // Find Client by name
     const client = await Client.findOne({ _id: client_id });
     if (!client) {
-      console.log("client not found")
+      console.log("client not found");
       return res.status(404).json({ message: 'Client not found' });
     }
 
-    // Find Employee by name
     const employee = await Employee.findOne({ _id: employee_id });
     if (!employee) {
-      console.log("employee not found")
+      console.log("employee not found");
       return res.status(404).json({ message: 'Employee not found' });
     }
 
-    // Determine status
     const status = pending_documents ? 'pending documents' : 'in progress';
 
-    // Create new Work
     const newWork = new Work({
       work_description,
-      work_assigned_date: new Date(),
       pending_documents,
       status,
       employeeId: employee._id,
       clientId: client._id,
+      work_assigned_date: work_assigned_date, // Taken from frontend now
+      due_date: due_date, // New field
+      fee_estimation: fee_estimation, // New field
     });
 
     await newWork.save();
@@ -322,12 +455,11 @@ app.post('/add-work', async (req, res) => {
       work: newWork,
     });
   } catch (error) {
-    console.log(error.message)
+    console.log(error.message);
     console.error('Error adding work:', error);
     res.status(500).json({ message: 'Internal server error', error: error.message });
   }
 });
-
 
 app.get('/search/:term', async (req, res) => {
     const term = req.params.term;
@@ -422,23 +554,27 @@ app.get('/employee/:id/work', async (req, res) => {
   }
 });
 app.put('/work/:workId', async (req, res) => {
-  const { work_completed_date } = req.body;
+  const { status, work_completed_date } = req.body;
+  console.log('Incoming update:', status, work_completed_date);
 
   try {
     const work = await Work.findById(req.params.workId);
     if (!work) return res.status(404).json({ message: 'Work not found' });
 
-    let updatedStatus = work.status;
-    if (work_completed_date) {
-      if (work.status === 'pending') {
-        updatedStatus = 'in progress';
-      } else {
-        updatedStatus = 'completed';
-      }
+    // Update status if provided
+    if (status) {
+      work.status = status;
     }
 
-    work.work_completed_date = work_completed_date;
-    work.status = updatedStatus;
+    // Update completed date if provided
+    if (work_completed_date) {
+      work.work_completed_date = work_completed_date;
+    }
+
+    // If status is completed but no completed date provided, set it to current time
+    if (work.status === 'completed' && !work.work_completed_date) {
+      work.work_completed_date = work_completed_date; // <-- set today's date
+    }
 
     const updatedWork = await work.save();
 
@@ -448,28 +584,6 @@ app.put('/work/:workId', async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 });
-
-// app.put('/work/:workId', async (req, res) => {
-//   const { work_completed_date } = req.body;
-
-//   try {
-//     const updatedWork = await Work.findByIdAndUpdate(
-//       req.params.workId,
-//       {
-//         work_completed_date,
-//         status: work_completed_date ? 'completed' : 'in progress',
-//       },
-//       { new: true }
-//     );
-
-//     if (!updatedWork) return res.status(404).json({ message: 'Work not found' });
-
-//     res.status(200).json(updatedWork);
-//   } catch (err) {
-//     console.error('Error updating work:', err);
-//     res.status(500).json({ message: 'Server error' });
-//   }
-// });
 
 app.use('/uploads', express.static('uploads'));
 
